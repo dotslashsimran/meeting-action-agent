@@ -10,6 +10,7 @@ from src.agents import (
     notion_orchestrator,
 )
 from src.tasks import build_tasks
+from src.tools import create_sprint_summary, reset_session
 
 
 def _step_throttle(step_output) -> None:
@@ -23,6 +24,7 @@ def _step_throttle(step_output) -> None:
 
 def run(transcript: str) -> str:
     """Assemble and kick off the 7-agent pipeline for the given transcript."""
+    reset_session()  # clear any items from a previous run
     tasks = build_tasks(transcript)
 
     crew = Crew(
@@ -42,4 +44,9 @@ def run(transcript: str) -> str:
     )
 
     result = crew.kickoff()
+
+    # Create the grouped Sprint Summary page from items accumulated by NotionTool
+    summary_result = create_sprint_summary()
+    print(f"\n📊 Sprint Summary: {summary_result}")
+
     return str(result)

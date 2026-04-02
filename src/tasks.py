@@ -176,8 +176,16 @@ def build_tasks(transcript: str) -> list[Task]:
             "```json\n"
             '{"id":"ACTION-NNN","title":"...","owner":"...","deadline":"...","priority":"...",'
             '"risk_score":0,"risk_flags":[],"execution_order":1,'
-            '"dependencies":"...","source_quote":"..."}\n'
+            '"dependencies":"...","source_quote":"...",'
+            '"notes":["any extra context, concerns, or side remarks from the call about this item"]}\n'
             "```\n\n"
+            "The 'notes' field is critical — include things like:\n"
+            "- Concerns raised ('Tom said his plate is full')\n"
+            "- Constraints mentioned ('no shortcuts on this one')\n"
+            "- Verbal flags ('let's flag that as a risk and figure it out offline')\n"
+            "- Tone signals ('that is aggressive but okay')\n"
+            "- Context that changes how the item should be approached\n"
+            "If nothing notable was said, set notes to [].\n\n"
             "After all items, output a QA SUMMARY:\n"
             "- Total items reviewed\n"
             "- Items approved vs flagged\n"

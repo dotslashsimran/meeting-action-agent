@@ -1,3 +1,4 @@
+import os
 import time
 from typing import Callable, Optional
 from crewai import Crew, Process
@@ -24,6 +25,17 @@ _AGENTS = [
 ]
 
 
+def _traced_run(func):
+    """Wrap func in a neatlogs WORKFLOW span if tracing is configured."""
+    if os.getenv("NEATLOGS_API_KEY") and os.getenv("NEATLOGS_ENDPOINT"):
+        try:
+            import neatlogs
+            return neatlogs.span(kind="WORKFLOW")(func)
+        except Exception:
+            pass
+    return func
+
+
 def run(
     transcript: str,
     verbose: bool = False,
@@ -36,6 +48,11 @@ def run(
         (result_str, summary_str) — pipeline final output + sprint summary status
     """
     reset_session()
+
+    # Wrap the inner kickoff in a WORKFLOW span so every LLM call is a child
+    @_traced_run
+    def _kickoff():
+        return crew.kickoff()
 
     # Set verbosity on all agents
     for agent in _AGENTS:
@@ -65,7 +82,7 @@ def run(
         task_callback=_task_done,
     )
 
-    result = crew.kickoff()
+    result = _kickoff()
     summary = create_sprint_summary()
 
     return str(result), summary

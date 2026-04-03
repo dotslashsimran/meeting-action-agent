@@ -14,6 +14,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Neatlogs must init before any LLM/CrewAI imports
+from src.telemetry import init as _telemetry_init, flush as _telemetry_flush
+_TRACING = _telemetry_init()
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -191,6 +195,8 @@ def _result_panel(items_published: int, summary: str, elapsed: float) -> Panel:
     if owners:
         lines.append(f"[dim]   Owners: {owners}[/dim]")
     lines.append(f"[dim]   Total runtime: {elapsed:.1f}s[/dim]")
+    if _TRACING:
+        lines.append("[dim]   Trace sent to Neatlogs ✓[/dim]")
 
     return Panel(
         "\n".join(lines),
@@ -229,6 +235,7 @@ def run_pipeline(transcript: str, verbose: bool = False) -> None:
             state["error"] = exc
         finally:
             state["done"] = True
+            _telemetry_flush()
 
     console.print()
     start = time.time()
@@ -291,10 +298,16 @@ _COMMANDS = [
 
 def _print_banner() -> None:
     console.print()
+    tracing_line = (
+        "[dim]Observability: Neatlogs ✓[/dim]"
+        if _TRACING else
+        "[dim red]Observability: set NEATLOGS_ENDPOINT to enable tracing[/dim red]"
+    )
     console.print(Panel(
         "[bold white]meeting-agent[/bold white]\n"
         "[dim]7-agent AI pipeline  •  Groq LLaMA  •  Notion[/dim]\n"
-        "[dim]Risk detection  •  Owner resolution  •  Execution strategy[/dim]",
+        "[dim]Risk detection  •  Owner resolution  •  Execution strategy[/dim]\n"
+        + tracing_line,
         border_style="cyan",
         padding=(1, 4),
         expand=False,

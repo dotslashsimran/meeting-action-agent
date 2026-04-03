@@ -1,4 +1,5 @@
 import time
+from typing import Callable, Optional
 from crewai import Crew, Process
 from src.agents import (
     meeting_analyst,
@@ -12,41 +13,59 @@ from src.agents import (
 from src.tasks import build_tasks
 from src.tools import create_sprint_summary, reset_session
 
+_AGENTS = [
+    meeting_analyst,
+    action_extractor,
+    risk_detector,
+    owner_resolver,
+    execution_strategist,
+    qa_reviewer,
+    notion_orchestrator,
+]
 
-def _step_throttle(step_output) -> None:
+
+def run(
+    transcript: str,
+    verbose: bool = False,
+    on_task_complete: Optional[Callable[[int, float], None]] = None,
+) -> tuple[str, str]:
     """
-    1-second pause after every agent step.
-    Prevents token-per-minute spikes on Groq's free tier when running
-    a multi-agent pipeline with large context windows.
+    Assemble and kick off the 7-agent pipeline.
+
+    Returns:
+        (result_str, summary_str) — pipeline final output + sprint summary status
     """
-    time.sleep(1)
+    reset_session()
 
+    # Set verbosity on all agents
+    for agent in _AGENTS:
+        agent.verbose = verbose
 
-def run(transcript: str) -> str:
-    """Assemble and kick off the 7-agent pipeline for the given transcript."""
-    reset_session()  # clear any items from a previous run
     tasks = build_tasks(transcript)
 
+    task_idx = [0]
+    task_start = [time.time()]
+
+    def _step_throttle(step_output) -> None:
+        time.sleep(1)
+
+    def _task_done(output) -> None:
+        elapsed = time.time() - task_start[0]
+        if on_task_complete:
+            on_task_complete(task_idx[0], elapsed)
+        task_idx[0] += 1
+        task_start[0] = time.time()
+
     crew = Crew(
-        agents=[
-            meeting_analyst,
-            action_extractor,
-            risk_detector,
-            owner_resolver,
-            execution_strategist,
-            qa_reviewer,
-            notion_orchestrator,
-        ],
+        agents=_AGENTS,
         tasks=tasks,
         process=Process.sequential,
-        verbose=True,
+        verbose=verbose,
         step_callback=_step_throttle,
+        task_callback=_task_done,
     )
 
     result = crew.kickoff()
+    summary = create_sprint_summary()
 
-    # Create the grouped Sprint Summary page from items accumulated by NotionTool
-    summary_result = create_sprint_summary()
-    print(f"\n📊 Sprint Summary: {summary_result}")
-
-    return str(result)
+    return str(result), summary

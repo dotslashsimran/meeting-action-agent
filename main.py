@@ -1,31 +1,45 @@
 #!/usr/bin/env python3
 """
-meeting-action-agent — CLI entry point.
+meeting-agent — interactive terminal
 
-Usage:
-  python main.py --demo
-  python main.py --file transcript.txt
-  python main.py --text "Alice: do the thing. Bob: I'll handle it."
-  cat transcript.txt | python main.py
+Start:  python main.py
+Then use slash commands to control it.
 """
 
-import argparse
-import sys
 import os
+import sys
 import time
+import threading
 from dotenv import load_dotenv
 
-# Load .env before importing crew (crewai/litellm reads env at import time)
 load_dotenv()
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.live import Live
+from rich.rule import Rule
+from rich import box as rbox
+
+console = Console()
+
+# ── Pipeline stages (display names + descriptions) ─────────────────────────────
+
+STAGES = [
+    ("Meeting Intelligence Analyst",      "Classify meeting, extract participants & risk signals"),
+    ("Action Extraction Specialist",      "Extract all items + SMART self-review"),
+    ("Risk Detection Engineer",           "4-pass risk scoring: vague / deadline / security / overload"),
+    ("Ownership & Accountability Expert", "Owner attribution with confidence scores"),
+    ("Sprint Execution Strategist",       "Dependencies, critical path, execution order"),
+    ("QA Reviewer",                       "Final quality gate + consistency check"),
+    ("Notion Publishing Orchestrator",    "Publish enriched items → Notion"),
+]
+
+_SPINNER = list("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
 # ── Demo transcript ────────────────────────────────────────────────────────────
-# Engineered to trigger every detection category in the risk scorer:
-#   • Vague action items  (Diana, Priya)
-#   • Owner overload      (Marcus × 3, Tom × 3)
-#   • Deadline conflict   (Marcus: auth refactor + API docs, same week)
-#   • Security sensitive  (Raj: SQL injection vulnerability)
-#   • Implicit dependency (Priya blocked on Raj, Aisha blocked on Marcus)
-#   • Ambiguous ownership (dashboard copy: Simran vs Raj)
+
 DEMO_TRANSCRIPT = """\
 Meeting: Product Team Sprint Planning — April 2, 2026
 Attendees: Simran (CPO), Marcus (Lead Engineer), Priya (Senior Designer),
@@ -115,118 +129,276 @@ sign off on the QA side before it can merge to main. No shortcuts on this one.
 Make sure you are all tracking your items.
 """
 
-AGENT_STAGES = [
-    ("Meeting Intelligence Analyst",  "Classifying meeting, extracting participants, spotting risk signals"),
-    ("Action Extraction Specialist",   "Extracting all action items + running SMART quality validation"),
-    ("Risk Detection Engineer",        "Multi-pass risk scoring: vagueness, deadlines, security, overload"),
-    ("Ownership & Accountability Expert", "Multi-pass owner attribution with confidence scoring"),
-    ("Sprint Execution Strategist",    "Mapping dependencies, critical path, timeline conflicts"),
-    ("QA Reviewer",                    "Final quality gate: consistency check + SMART validation"),
-    ("Notion Publishing Orchestrator", "Publishing enriched action items to Notion"),
-]
+
+# ── Rendering ──────────────────────────────────────────────────────────────────
+
+def _progress_panel(completed: int, times: list[float], done: bool = False) -> Panel:
+    frame = _SPINNER[int(time.time() * 8) % len(_SPINNER)]
+
+    table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+    table.add_column("n",    width=2,  justify="right", style="dim")
+    table.add_column("icon", width=2)
+    table.add_column("name", width=36)
+    table.add_column("desc", style="dim")
+    table.add_column("t",    width=6,  justify="right", style="dim green")
+
+    for i, (name, desc) in enumerate(STAGES):
+        if i < completed:
+            icon  = Text("✓", style="bold green")
+            nstyle = ""
+            t     = f"{times[i]:.1f}s" if i < len(times) else ""
+        elif i == completed and not done:
+            icon  = Text(frame, style="bold cyan")
+            nstyle = "bold cyan"
+            t     = "…"
+        else:
+            icon  = Text("○", style="dim")
+            nstyle = "dim"
+            t     = ""
+
+        table.add_row(str(i + 1), icon, Text(name, style=nstyle), desc, t)
+
+    title = (
+        "[bold green]✓ Pipeline Complete[/bold green]"
+        if done else
+        "[bold cyan]Pipeline Running[/bold cyan]"
+    )
+    border = "green" if done else "cyan"
+    return Panel(table, title=title, border_style=border, padding=(0, 1))
 
 
-def print_banner(console):
-    from rich.panel import Panel
-    from rich.text import Text
-    banner = Text()
-    banner.append("Meeting Action Agent\n", style="bold white")
-    banner.append("7-Agent Pipeline  •  Groq LLaMA 3.3  •  Notion\n", style="dim")
-    banner.append("Risk Detection  •  Owner Resolution  •  Execution Strategy", style="dim cyan")
-    console.print(Panel(banner, border_style="cyan", padding=(1, 4)))
+def _result_panel(items_published: int, summary: str, elapsed: float) -> Panel:
+    # Parse escalation count from summary string if present
+    esc = ""
+    if "Escalations:" in summary:
+        try:
+            n = summary.split("Escalations:")[1].split("|")[0].strip()
+            esc = f"  •  {n} escalation{'s' if n != '1' else ''}"
+        except Exception:
+            pass
+
+    owners = ""
+    if "Owners:" in summary:
+        try:
+            owners = summary.split("Owners:")[1].split("|")[0].strip()
+        except Exception:
+            pass
+
+    lines = [
+        f"[bold green]✓[/bold green]  {items_published} action items published to Notion",
+        f"[bold green]✓[/bold green]  Sprint Summary page created{esc}",
+    ]
+    if owners:
+        lines.append(f"[dim]   Owners: {owners}[/dim]")
+    lines.append(f"[dim]   Total runtime: {elapsed:.1f}s[/dim]")
+
+    return Panel(
+        "\n".join(lines),
+        border_style="green",
+        padding=(0, 2),
+    )
+
+
+# ── Pipeline runner ────────────────────────────────────────────────────────────
+
+def _validate_env() -> list[str]:
+    return [v for v in ("GROQ_API_KEY", "NOTION_TOKEN", "NOTION_DATABASE_ID") if not os.getenv(v)]
+
+
+def run_pipeline(transcript: str, verbose: bool = False) -> None:
+    missing = _validate_env()
+    if missing:
+        console.print(f"\n  [bold red]✗ Missing:[/bold red] {', '.join(missing)}")
+        console.print("  [dim]Add them to .env and retry.[/dim]\n")
+        return
+
+    from src.crew import run as crew_run
+
+    state: dict = {"completed": 0, "times": [], "done": False, "result": None, "summary": None, "error": None}
+
+    def on_task_complete(idx: int, elapsed: float) -> None:
+        state["times"].append(elapsed)
+        state["completed"] = idx + 1
+
+    def worker() -> None:
+        try:
+            result, summary = crew_run(transcript, verbose=verbose, on_task_complete=on_task_complete)
+            state["result"] = result
+            state["summary"] = summary
+        except Exception as exc:
+            state["error"] = exc
+        finally:
+            state["done"] = True
+
+    console.print()
+    start = time.time()
+
+    if verbose:
+        # Raw CrewAI output — no live display
+        try:
+            result, summary = crew_run(transcript, verbose=True, on_task_complete=on_task_complete)
+            console.print(f"\n[dim]{summary}[/dim]\n")
+        except Exception as exc:
+            console.print(f"\n[bold red]Error:[/bold red] {exc}\n")
+        return
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+
+    with Live(
+        _progress_panel(0, []),
+        console=console,
+        refresh_per_second=8,
+        transient=False,
+    ) as live:
+        while not state["done"]:
+            live.update(_progress_panel(state["completed"], state["times"]))
+            time.sleep(0.05)
+        # Final update — all complete
+        live.update(_progress_panel(len(STAGES), state["times"], done=True))
+
+    t.join()
+    elapsed = time.time() - start
+
+    if state["error"]:
+        console.print(f"\n  [bold red]✗ Pipeline failed:[/bold red] {state['error']}\n")
+        return
+
+    # Count published items from summary string
+    items_published = len(state["times"])  # rough proxy; summary has exact count
+    if state["summary"] and "items |" in state["summary"]:
+        try:
+            items_published = int(state["summary"].split("items |")[0].split("|")[-1].strip())
+        except Exception:
+            pass
+
+    console.print()
+    console.print(_result_panel(items_published, state["summary"] or "", elapsed))
     console.print()
 
 
-def print_pipeline(console):
-    from rich.table import Table
-    table = Table(show_header=True, header_style="bold cyan", box=None, padding=(0, 2))
-    table.add_column("#", style="dim", width=3)
-    table.add_column("Agent", style="bold")
-    table.add_column("Responsibility", style="dim")
-    for i, (name, desc) in enumerate(AGENT_STAGES, 1):
-        table.add_row(str(i), name, desc)
+# ── REPL ───────────────────────────────────────────────────────────────────────
+
+_COMMANDS = [
+    ("/demo",        "run with built-in demo transcript"),
+    ("/paste",       "paste a transcript — type END on its own line to finish"),
+    ("/file <path>", "load transcript from a file"),
+    ("/verbose",     "toggle verbose mode (shows raw agent output)"),
+    ("/help",        "show this help"),
+    ("/quit",        "exit"),
+]
+
+
+def _print_banner() -> None:
+    console.print()
+    console.print(Panel(
+        "[bold white]meeting-agent[/bold white]\n"
+        "[dim]7-agent AI pipeline  •  Groq LLaMA  •  Notion[/dim]\n"
+        "[dim]Risk detection  •  Owner resolution  •  Execution strategy[/dim]",
+        border_style="cyan",
+        padding=(1, 4),
+        expand=False,
+    ))
+    console.print()
+    _print_help()
+
+
+def _print_help() -> None:
+    table = Table(show_header=False, box=None, padding=(0, 2), expand=False)
+    table.add_column("cmd",  style="bold cyan")
+    table.add_column("desc", style="dim")
+    for cmd, desc in _COMMANDS:
+        table.add_row(cmd, desc)
     console.print(table)
     console.print()
 
 
-def main():
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.syntax import Syntax
+def _get_paste() -> str | None:
+    console.print("  [dim]Paste your transcript. Type [bold]END[/bold] on a new line when done.[/dim]\n")
+    lines: list[str] = []
+    while True:
+        try:
+            line = input("  ")
+        except EOFError:
+            break
+        if line.strip() == "END":
+            break
+        lines.append(line)
 
-    console = Console()
+    if not lines:
+        console.print("  [dim red]Nothing entered.[/dim red]\n")
+        return None
 
-    parser = argparse.ArgumentParser(
-        description="Turn meeting transcripts into Notion action items via a 7-agent AI pipeline."
-    )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--demo",  action="store_true", help="Run with the built-in demo transcript")
-    group.add_argument("--file",  metavar="PATH",       help="Path to a transcript text file")
-    group.add_argument("--text",  metavar="TRANSCRIPT", help="Transcript passed as a string")
-    args = parser.parse_args()
+    transcript = "\n".join(lines)
+    words = len(transcript.split())
+    console.print(f"\n  [dim]✓ {words} words received[/dim]\n")
+    return transcript
 
-    print_banner(console)
 
-    # ── Transcript source ─────────────────────────────────────────────────────
-    if args.demo:
-        console.print("[bold cyan]▶ Source:[/bold cyan] built-in demo transcript (sprint planning scenario)\n")
-        transcript = DEMO_TRANSCRIPT
-    elif args.file:
-        console.print(f"[bold cyan]▶ Source:[/bold cyan] {args.file}\n")
-        with open(args.file, "r", encoding="utf-8") as f:
-            transcript = f.read()
-    elif args.text:
-        console.print("[bold cyan]▶ Source:[/bold cyan] --text argument\n")
-        transcript = args.text
-    elif not sys.stdin.isatty():
-        console.print("[bold cyan]▶ Source:[/bold cyan] stdin\n")
-        transcript = sys.stdin.read()
-    else:
-        parser.print_help()
-        sys.exit(1)
+def _load_file(path: str) -> str | None:
+    try:
+        with open(path.strip(), "r", encoding="utf-8") as f:
+            content = f.read()
+        words = len(content.split())
+        console.print(f"  [dim]✓ Loaded {words} words from {path}[/dim]\n")
+        return content
+    except FileNotFoundError:
+        console.print(f"  [bold red]✗ File not found:[/bold red] {path}\n")
+        return None
+    except Exception as exc:
+        console.print(f"  [bold red]✗ Error reading file:[/bold red] {exc}\n")
+        return None
 
-    # ── Validate env vars ─────────────────────────────────────────────────────
-    missing = [v for v in ("GROQ_API_KEY", "NOTION_TOKEN", "NOTION_DATABASE_ID") if not os.getenv(v)]
-    if missing:
-        console.print(f"[bold red]✗ Missing env vars:[/bold red] {', '.join(missing)}")
-        console.print("  Add them to your .env file and retry.")
-        sys.exit(1)
 
-    # ── Transcript preview ────────────────────────────────────────────────────
-    preview = transcript.strip()[:400]
-    if len(transcript.strip()) > 400:
-        preview += "\n[...]"
-    console.print(Panel(preview, title="Transcript Preview", border_style="dim", padding=(0, 2)))
-    console.print()
+def main() -> None:
+    _print_banner()
 
-    # ── Pipeline overview ─────────────────────────────────────────────────────
-    console.print("[bold]Pipeline:[/bold] 7 agents running sequentially\n")
-    print_pipeline(console)
+    verbose = False
 
-    console.print("[bold cyan]Starting pipeline...[/bold cyan]\n")
-    console.rule(style="dim")
+    while True:
+        try:
+            raw = input("❯ ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n  [dim]Bye![/dim]\n")
+            break
 
-    start = time.time()
+        if not raw:
+            continue
 
-    from src.crew import run
-    result = run(transcript)
+        cmd = raw.lower()
 
-    elapsed = time.time() - start
+        if cmd in ("/quit", "/exit", "q", "quit", "exit"):
+            console.print("\n  [dim]Bye![/dim]\n")
+            break
 
-    # ── Final output ──────────────────────────────────────────────────────────
-    console.rule(style="dim")
-    console.print()
-    console.print(Panel(
-        result,
-        title="[bold green]Pipeline Complete[/bold green]",
-        border_style="green",
-        padding=(1, 2),
-    ))
-    console.print()
-    console.print(f"[dim]Total runtime: {elapsed:.1f}s  •  "
-                  f"Agents: {len(AGENT_STAGES)}  •  "
-                  f"Check your Notion database for the published items.[/dim]")
-    console.print()
+        elif cmd == "/demo":
+            run_pipeline(DEMO_TRANSCRIPT, verbose)
+
+        elif cmd == "/paste":
+            transcript = _get_paste()
+            if transcript:
+                run_pipeline(transcript, verbose)
+
+        elif raw.startswith("/file"):
+            path = raw[5:].strip()
+            if not path:
+                console.print("  [dim red]Usage: /file <path>[/dim red]\n")
+            else:
+                transcript = _load_file(path)
+                if transcript:
+                    run_pipeline(transcript, verbose)
+
+        elif cmd == "/verbose":
+            verbose = not verbose
+            state = "on" if verbose else "off"
+            icon  = "🔊" if verbose else "🔇"
+            console.print(f"  [dim]{icon}  Verbose mode: {state}[/dim]\n")
+
+        elif cmd in ("/help", "help", "?", "h"):
+            _print_help()
+
+        else:
+            console.print("  [dim]Unknown command — type [bold cyan]/help[/bold cyan][/dim]\n")
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ meeting_analyst = Agent(
         "Your analysis sets the stage for every agent that follows you."
     ),
     llm=LLM,
-    verbose=True,
+    verbose=False,
 )
 
 
@@ -56,7 +56,7 @@ action_extractor = Agent(
         "confidence in the extraction so downstream agents know how much to trust you."
     ),
     llm=LLM,
-    verbose=True,
+    verbose=False,
 )
 
 
@@ -78,7 +78,7 @@ risk_detector = Agent(
         "OWNER_OVERLOADED. Your reports have caught things no one else noticed."
     ),
     llm=LLM,
-    verbose=True,
+    verbose=False,
 )
 
 
@@ -98,7 +98,7 @@ owner_resolver = Agent(
         "or is explicitly flagged as needing one."
     ),
     llm=LLM,
-    verbose=True,
+    verbose=False,
 )
 
 
@@ -117,7 +117,7 @@ execution_strategist = Agent(
         "that cascade into?'"
     ),
     llm=LLM,
-    verbose=True,
+    verbose=False,
 )
 
 
@@ -136,7 +136,7 @@ qa_reviewer = Agent(
         "You are thorough, independent-minded, and you apply SMART criteria rigorously."
     ),
     llm=LLM,
-    verbose=True,
+    verbose=False,
 )
 
 
@@ -157,5 +157,5 @@ notion_orchestrator = Agent(
     ),
     llm=LLM,
     tools=[_notion_tool],
-    verbose=True,
+    verbose=False,
 )

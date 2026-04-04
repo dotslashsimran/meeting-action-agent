@@ -1,6 +1,15 @@
-crewai>=0.80.0
-litellm>=1.0.0
-notion-client>=2.2.1
-python-dotenv>=1.0.0
-rich>=13.0.0
-neatlogs
+# Install with pip (not uv):
+#   pip install -r requirements.txt
+#
+# crewai==1.13.0 pins opentelemetry-api<1.35, but neatlogs pulls in
+# opentelemetry-instrumentation-openai which declares >=1.38. uv refuses
+# this as unsatisfiable. pip installs both and it works in practice because
+# the actual code paths are compatible with 1.34.x.
+
+crewai
+litellm
+notion-client
+python-dotenv
+rich
+neatlogs==1.2.6
+google-genai

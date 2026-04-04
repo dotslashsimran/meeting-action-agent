@@ -29,7 +29,7 @@ class RiskScorerInput(BaseModel):
 
 
 class RiskScorerTool(BaseTool):
-    name: str = "risk_scorer"
+    name: str = "Analyse Risk & Priority"
     description: str = (
         "Runs multi-pass risk detection on a list of action items. "
         "Detects: vague actions, missing deadlines on critical items, "

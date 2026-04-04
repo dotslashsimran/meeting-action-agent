@@ -2,25 +2,13 @@ import os
 import time
 from typing import Callable, Optional
 from crewai import Crew, Process
-from src.agents import (
-    meeting_analyst,
-    action_extractor,
-    risk_detector,
-    owner_resolver,
-    execution_strategist,
-    qa_reviewer,
-    notion_orchestrator,
-)
+from src.agents import meeting_analyst, risk_scorer_agent, notion_orchestrator
 from src.tasks import build_tasks
 from src.tools import create_sprint_summary, reset_session
 
 _AGENTS = [
     meeting_analyst,
-    action_extractor,
-    risk_detector,
-    owner_resolver,
-    execution_strategist,
-    qa_reviewer,
+    risk_scorer_agent,
     notion_orchestrator,
 ]
 
@@ -30,7 +18,7 @@ def _traced_run(func):
     if os.getenv("NEATLOGS_API_KEY") and os.getenv("NEATLOGS_ENDPOINT"):
         try:
             import neatlogs
-            return neatlogs.span(kind="WORKFLOW")(func)
+            return neatlogs.span(kind="WORKFLOW", name="Process Meeting")(func)
         except Exception:
             pass
     return func
@@ -51,7 +39,7 @@ def run(
 
     # Wrap the inner kickoff in a WORKFLOW span so every LLM call is a child
     @_traced_run
-    def _kickoff():
+    def process_meeting():
         return crew.kickoff()
 
     # Set verbosity on all agents
@@ -82,7 +70,7 @@ def run(
         task_callback=_task_done,
     )
 
-    result = _kickoff()
+    result = process_meeting()
     summary = create_sprint_summary()
 
     return str(result), summary

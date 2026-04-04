@@ -1,15 +1,16 @@
+import os
 import litellm
 from crewai import LLM
 
-# Global litellm retry settings — ensures rate-limit responses trigger
-# exponential backoff before re-attempting.
-litellm.num_retries = 10
+litellm.num_retries = 6
 litellm.drop_params = True
+# Wait for retry-after header (Groq sends exact seconds to wait)
+litellm.retry_after = True
 
-# llama-4-scout is a newer model on Groq with higher free-tier rate limits
-# than the older llama-3.x models.
 llm = LLM(
-    model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
-    max_retries=10,
+    model="gemini/gemini-2.5-pro",
+    api_key=os.getenv("GEMINI_API_KEY"),
+    is_litellm=True,  # Force LiteLLM routing so Neatlogs instruments LLM calls + costs
+    max_retries=6,
     timeout=120,
 )

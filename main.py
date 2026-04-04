@@ -31,13 +31,9 @@ console = Console()
 # ── Pipeline stages (display names + descriptions) ─────────────────────────────
 
 STAGES = [
-    ("Meeting Intelligence Analyst",      "Classify meeting, extract participants & risk signals"),
-    ("Action Extraction Specialist",      "Extract all items + SMART self-review"),
-    ("Risk Detection Engineer",           "4-pass risk scoring: vague / deadline / security / overload"),
-    ("Ownership & Accountability Expert", "Owner attribution with confidence scores"),
-    ("Sprint Execution Strategist",       "Dependencies, critical path, execution order"),
-    ("QA Reviewer",                       "Final quality gate + consistency check"),
-    ("Notion Publishing Orchestrator",    "Publish enriched items → Notion"),
+    ("Meeting Analyst",               "Extract action items from transcript"),
+    ("Risk Scorer",                   "Score risks via tool call → flags, escalations"),
+    ("Notion Publishing Orchestrator","Publish enriched items → Notion"),
 ]
 
 _SPINNER = list("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
@@ -208,7 +204,7 @@ def _result_panel(items_published: int, summary: str, elapsed: float) -> Panel:
 # ── Pipeline runner ────────────────────────────────────────────────────────────
 
 def _validate_env() -> list[str]:
-    return [v for v in ("GROQ_API_KEY", "NOTION_TOKEN", "NOTION_DATABASE_ID") if not os.getenv(v)]
+    return [v for v in ("GEMINI_API_KEY", "NOTION_TOKEN", "NOTION_DATABASE_ID") if not os.getenv(v)]
 
 
 def run_pipeline(transcript: str, verbose: bool = False) -> None:
@@ -305,7 +301,7 @@ def _print_banner() -> None:
     )
     console.print(Panel(
         "[bold white]meeting-agent[/bold white]\n"
-        "[dim]7-agent AI pipeline  •  Groq LLaMA  •  Notion[/dim]\n"
+        "[dim]3-agent AI pipeline  •  Gemini 2.5 Pro  •  Notion[/dim]\n"
         "[dim]Risk detection  •  Owner resolution  •  Execution strategy[/dim]\n"
         + tracing_line,
         border_style="cyan",
@@ -404,7 +400,7 @@ def main() -> None:
         elif cmd == "/verbose":
             verbose = not verbose
             state = "on" if verbose else "off"
-            icon  = "🔊" if verbose else "🔇"
+            icon  = "[on]" if verbose else "[off]"
             console.print(f"  [dim]{icon}  Verbose mode: {state}[/dim]\n")
 
         elif cmd in ("/help", "help", "?", "h"):

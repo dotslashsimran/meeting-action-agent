@@ -86,7 +86,7 @@ def _priority_emoji(priority: str) -> str:
 
 
 class NotionSummaryTool(BaseTool):
-    name: str = "notion_sprint_summary"
+    name: str = "Publish Sprint Summary"
     description: str = (
         "Creates a master Sprint Summary page in Notion after all action items are published. "
         "Groups items by owner, highlights escalations, shows the critical path in execution "

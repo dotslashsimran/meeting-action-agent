@@ -72,11 +72,11 @@ def _quote(text: str) -> dict:
     return _rich("quote", text)
 
 
-def _callout(text: str, emoji: str = "💡") -> dict:
+def _callout(text: str) -> dict:
     return {
         "object": "block",
         "type": "callout",
-        "callout": {"rich_text": [_text(text)], "icon": {"type": "emoji", "emoji": emoji}},
+        "callout": {"rich_text": [_text(text)], "icon": {"type": "emoji", "emoji": "•"}},
     }
 
 
@@ -84,16 +84,10 @@ def _divider() -> dict:
     return {"object": "block", "type": "divider", "divider": {}}
 
 
-def _priority_emoji(priority: str) -> str:
-    return {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
-        priority.lower(), "⚪"
-    )
-
-
 # ── Tool ───────────────────────────────────────────────────────────────────────
 
 class NotionTool(BaseTool):
-    name: str = "notion_publisher"
+    name: str = "Publish Action Item"
     description: str = (
         "Creates a richly formatted action item page in the Notion database. "
         "Each page includes assignment details, risk analysis, execution order, "
@@ -126,36 +120,35 @@ class NotionTool(BaseTool):
             source_quote = str(data.get("source_quote", ""))
             notes = data.get("notes", [])
 
-            pe = _priority_emoji(priority)
             risk_label = (
-                "🚨 High Risk" if risk_score >= 70
-                else "⚠️  Medium Risk" if risk_score >= 40
-                else "✅ Low Risk"
+                "High Risk" if risk_score >= 70
+                else "Medium Risk" if risk_score >= 40
+                else "Low Risk"
             )
             flags_str = ", ".join(risk_flags) if risk_flags else "None"
 
             children = [
-                _h3("📋 Assignment"),
+                _h3("Assignment"),
                 _bullet(f"Owner: {owner}"),
                 _bullet(f"Deadline: {deadline}"),
-                _bullet(f"Priority: {pe} {priority}"),
+                _bullet(f"Priority: {priority}"),
                 _bullet("Status: Not Started"),
                 _divider(),
-                _h3("⚠️  Risk Analysis"),
+                _h3("Risk Analysis"),
                 _bullet(f"Risk Score: {risk_score}/100  ({risk_label})"),
                 _bullet(f"Flags: {flags_str}"),
                 _divider(),
-                _h3("🚀 Execution"),
+                _h3("Execution"),
                 _bullet(f"Execution Order: #{execution_order}"),
                 _bullet(f"Dependencies: {dependencies}"),
             ]
 
             if source_quote:
-                children += [_divider(), _h3("💬 Source Quote"), _quote(source_quote)]
+                children += [_divider(), _h3("Source Quote"), _quote(source_quote)]
 
             if notes:
                 children.append(_divider())
-                children.append(_h3("📝 Context & Notes"))
+                children.append(_h3("Context & Notes"))
                 for note in (notes if isinstance(notes, list) else [notes]):
                     children.append(_bullet(str(note)))
 
@@ -173,13 +166,13 @@ class NotionTool(BaseTool):
             _session_items.append(data)
 
             return (
-                f"✅ Published: '{title}' | Owner: {owner} | Deadline: {deadline} | "
-                f"Priority: {pe} {priority} | Risk: {risk_score}/100 | Page ID: {page_id}"
+                f"Published: '{title}' | Owner: {owner} | Deadline: {deadline} | "
+                f"Priority: {priority} | Risk: {risk_score}/100 | Page ID: {page_id}"
             )
 
         except Exception as exc:
             title = data.get("title", "?") if data else "?"
-            return f"❌ Error publishing '{title}': {exc}"
+            return f"Error publishing '{title}': {exc}"
 
 
 # ── Post-run sprint summary (called from crew.py) ─────────────────────────────
@@ -191,7 +184,7 @@ def create_sprint_summary() -> str:
     """
     items = _session_items
     if not items:
-        return "⚠️  No items accumulated — sprint summary skipped."
+        return "No items accumulated — sprint summary skipped."
 
     try:
         today = datetime.now().strftime("%B %d, %Y")
@@ -202,13 +195,12 @@ def create_sprint_summary() -> str:
         high_risk_count = sum(1 for i in items if int(i.get("risk_score", 0)) >= 50)
 
         blocks.append(_callout(
-            f"{total} action items  •  {critical_count} critical  •  {high_risk_count} high-risk",
-            "📊"
+            f"{total} action items  •  {critical_count} critical  •  {high_risk_count} high-risk"
         ))
         blocks.append(_divider())
 
         # ── Ownership Breakdown ────────────────────────────────────────────────
-        blocks.append(_h2("👥 Ownership Breakdown"))
+        blocks.append(_h2("Ownership Breakdown"))
         by_owner: dict[str, list[dict]] = defaultdict(list)
         for item in items:
             raw = str(item.get("owner", "Unassigned")).strip()
@@ -216,43 +208,43 @@ def create_sprint_summary() -> str:
                 by_owner[owner.strip()].append(item)
 
         for owner, owned in sorted(by_owner.items()):
-            overload = "  ⚠️ OVERLOADED" if len(owned) >= 3 else ""
+            overload = "  [OVERLOADED]" if len(owned) >= 3 else ""
             blocks.append(_h3(f"{owner}  ({len(owned)} item{'s' if len(owned) != 1 else ''}){overload}"))
             for item in sorted(owned, key=lambda x: int(x.get("execution_order", 99))):
-                pe = _priority_emoji(str(item.get("priority", "medium")))
                 t = item.get("title", "Untitled")
                 dl = item.get("deadline", "TBD")
                 rs = item.get("risk_score", 0)
                 order = item.get("execution_order", "—")
+                priority = item.get("priority", "Medium")
                 flags = item.get("risk_flags", [])
                 flag_str = f"  [{', '.join(flags)}]" if flags else ""
-                blocks.append(_bullet(f"#{order}  {pe} {t}  |  due {dl}  |  risk {rs}/100{flag_str}"))
+                blocks.append(_bullet(f"#{order}  {priority}  {t}  |  due {dl}  |  risk {rs}/100{flag_str}"))
 
         blocks.append(_divider())
 
         # ── Escalations ────────────────────────────────────────────────────────
         escalations = [i for i in items if int(i.get("risk_score", 0)) >= 50]
         if escalations:
-            blocks.append(_h2("🚨 Escalations  (risk ≥ 50)"))
+            blocks.append(_h2("Escalations  (risk >= 50)"))
             for item in sorted(escalations, key=lambda x: -int(x.get("risk_score", 0))):
                 rs = item.get("risk_score", 0)
                 t = item.get("title", "Untitled")
                 owner = item.get("owner", "Unassigned")
                 flags = item.get("risk_flags", [])
                 flag_str = f"  [{', '.join(flags)}]" if flags else ""
-                blocks.append(_bullet(f"🔥 {t}  |  {owner}  |  {rs}/100{flag_str}"))
+                blocks.append(_bullet(f"{t}  |  {owner}  |  {rs}/100{flag_str}"))
             blocks.append(_divider())
 
         # ── Critical Path ──────────────────────────────────────────────────────
-        blocks.append(_h2("⚡ Critical Path  (execution order)"))
+        blocks.append(_h2("Critical Path  (execution order)"))
         for item in sorted(items, key=lambda x: int(x.get("execution_order", 99))):
             order = item.get("execution_order", "—")
             t = item.get("title", "Untitled")
             owner = item.get("owner", "Unassigned")
             deps = str(item.get("dependencies", "None"))
             dep_str = (
-                f"  ← blocked by: {deps}"
-                if deps.lower() not in ("none", "—", "", "n/a")
+                f"  <- blocked by: {deps}"
+                if deps.lower() not in ("none", "-", "", "n/a")
                 else ""
             )
             blocks.append(_bullet(f"#{order}  {t}  [{owner}]{dep_str}"))
@@ -273,7 +265,7 @@ def create_sprint_summary() -> str:
                     )
 
         if conflicts:
-            blocks.append(_h2("🗓️  Timeline Conflicts"))
+            blocks.append(_h2("Timeline Conflicts"))
             for c in conflicts:
                 blocks.append(_bullet(c))
             blocks.append(_divider())
@@ -283,15 +275,15 @@ def create_sprint_summary() -> str:
 
         page = notion.pages.create(
             parent={"database_id": database_id},
-            properties={"Name": {"title": [_text(f"📊 Sprint Summary — {today}")]}},
+            properties={"Name": {"title": [_text(f"Sprint Summary — {today}")]}},
             children=blocks,
         )
         page_id = page.get("id", "unknown")
         owner_list = ", ".join(sorted(by_owner.keys()))
         return (
-            f"✅ Sprint Summary published | {total} items | "
+            f"Sprint Summary published | {total} items | "
             f"Owners: {owner_list} | Escalations: {len(escalations)} | Page ID: {page_id}"
         )
 
     except Exception as exc:
-        return f"❌ Error creating sprint summary: {exc}"
+        return f"Error creating sprint summary: {exc}"

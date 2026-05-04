@@ -1,6 +1,6 @@
-crewai>=0.80.0
-litellm>=1.0.0
+crewai==1.14.1
+openinference-instrumentation-crewai==1.1.2
 notion-client>=2.2.1
 python-dotenv>=1.0.0
 rich>=13.0.0
-neatlogs
+-e ../neatlogs[crewai]

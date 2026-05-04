@@ -14,6 +14,7 @@ These flags are what observability tools can surface as detections.
 
 import json
 from typing import Type
+
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 

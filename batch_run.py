@@ -807,12 +807,10 @@ def run_transcript(idx: int, run: dict) -> None:
     import threading
     import time as t
 
-    from src.telemetry import retag
     from src.crew import run as crew_run
     from main import STAGES, _progress_panel, _result_panel, _TRACING
 
     title = run["title"]
-    retag(run["tags"])
 
     console.print(Rule(f"[bold cyan]Run {idx}/10 — {title}[/bold cyan]", style="cyan"))
     console.print()
@@ -825,7 +823,12 @@ def run_transcript(idx: int, run: dict) -> None:
 
     def worker() -> None:
         try:
-            result, summary = crew_run(run["transcript"], verbose=False, on_task_complete=on_task_complete)
+            result, summary = crew_run(
+                run["transcript"],
+                verbose=False,
+                on_task_complete=on_task_complete,
+                tags=run["tags"],
+            )
             state["result"] = result
             state["summary"] = summary
         except Exception as exc:
@@ -883,8 +886,8 @@ def main() -> None:
 
     console.print()
 
-    from src.telemetry import flush
-    flush()
+    from src.telemetry import shutdown
+    shutdown()
 
 
 if __name__ == "__main__":

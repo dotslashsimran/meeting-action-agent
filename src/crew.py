@@ -1,6 +1,6 @@
-import os
 import time
 from typing import Callable, Optional
+import neatlogs
 from crewai import Crew, Process
 from src.agents import meeting_analyst, risk_scorer_agent, notion_orchestrator
 from src.tasks import build_tasks
@@ -13,34 +13,19 @@ _AGENTS = [
 ]
 
 
-def _traced_run(func):
-    """Wrap func in a neatlogs WORKFLOW span if tracing is configured."""
-    if os.getenv("NEATLOGS_API_KEY") and os.getenv("NEATLOGS_ENDPOINT"):
-        try:
-            import neatlogs
-            return neatlogs.span(kind="WORKFLOW", name="Process Meeting")(func)
-        except Exception:
-            pass
-    return func
-
-
 def run(
     transcript: str,
     verbose: bool = False,
     on_task_complete: Optional[Callable[[int, float], None]] = None,
+    tags: list[str] | None = None,
 ) -> tuple[str, str]:
     """
-    Assemble and kick off the 7-agent pipeline.
+    Assemble and kick off the 3-agent pipeline.
 
     Returns:
         (result_str, summary_str) — pipeline final output + sprint summary status
     """
     reset_session()
-
-    # Wrap the inner kickoff in a WORKFLOW span so every LLM call is a child
-    @_traced_run
-    def process_meeting():
-        return crew.kickoff()
 
     # Set verbosity on all agents
     for agent in _AGENTS:
@@ -69,6 +54,13 @@ def run(
         step_callback=_step_throttle,
         task_callback=_task_done,
     )
+
+    # WORKFLOW span wraps the full crew run so every LLM/agent/tool span is a
+    # child. Per-run tags (e.g. transcript topic) are passed in here instead of
+    # re-calling neatlogs.init(), which would break import-order patching.
+    @neatlogs.span(kind="WORKFLOW", name="Process Meeting", tags=tags or [])
+    def process_meeting():
+        return crew.kickoff()
 
     result = process_meeting()
     summary = create_sprint_summary()

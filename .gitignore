@@ -8,3 +8,7 @@ dist/
 build/
 outputs/
 .DS_Store
+spans_raw_*.log
+client_demo.py
+meeting_demo.py
+notion_output/

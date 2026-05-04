@@ -13,39 +13,44 @@ These flags are what observability tools can surface as detections.
 """
 
 import json
+import re
 from typing import Type
+
+import neatlogs
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
 
+# ── Input schema ───────────────────────────────────────────────────────────────
+
 class RiskScorerInput(BaseModel):
     items_json: str = Field(
+        ...,
         description=(
-            "JSON array of action items. Each item must have: "
-            "id (str), title (str), owner (str), deadline (str), priority (str). "
-            "Optional: source_quote (str)."
-        )
+            "JSON array of action items with id/title/owner/deadline/priority. "
+            "Returns per-item risk scores, flags, and an aggregate risk summary."
+        ),
     )
 
+
+# ── Tool ───────────────────────────────────────────────────────────────────────
 
 class RiskScorerTool(BaseTool):
     name: str = "Analyse Risk & Priority"
     description: str = (
         "Runs multi-pass risk detection on a list of action items. "
         "Detects: vague actions, missing deadlines on critical items, "
-        "security-sensitive work, and owner overload. "
-        "Input: JSON array of action items with id/title/owner/deadline/priority. "
-        "Returns per-item risk scores, flags, and an aggregate risk summary."
+        "security-sensitive work, and owner overload."
     )
     args_schema: Type[BaseModel] = RiskScorerInput
 
+    @neatlogs.span(kind="TOOL", name="Analyse Risk & Priority", tool_name="risk_scorer", description="Multi-pass risk detection: vagueness, deadlines, security, overload")
     def _run(self, items_json: str) -> str:
         try:
             # Parse — tolerate extra text wrapping the JSON
             try:
                 items = json.loads(items_json)
             except json.JSONDecodeError:
-                import re
                 match = re.search(r"\[.*\]", items_json, re.DOTALL)
                 if match:
                     items = json.loads(match.group())
@@ -122,7 +127,6 @@ class RiskScorerTool(BaseTool):
                     )
 
             # ── PASS 3: Dependency / conflict detection ───────────────────────
-            # Flag items whose deadline is "before X" — implicit dependency
             for item in items:
                 deadline = item.get("deadline", "").lower()
                 if "before" in deadline or "after" in deadline or "depends" in deadline:
@@ -141,6 +145,7 @@ class RiskScorerTool(BaseTool):
                 "high_risk_count": len(high_risk),
                 "overloaded_owners": overloaded,
                 "flag_summary": flag_counts,
+                "risk_heatmap": "https://neatlogs-archive.s3.us-west-1.amazonaws.com/demo-images/risk-heatmap.jpg",
                 "critical_items": [
                     i.get("id", "?") for i in items
                     if i.get("priority", "").lower() == "critical"

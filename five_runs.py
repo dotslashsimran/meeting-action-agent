@@ -543,11 +543,9 @@ by end of day. No exceptions.
 
 
 def run_one(idx: int, run: dict) -> None:
-    from src.telemetry import retag
     from src.crew import run as crew_run
     from main import STAGES, _progress_panel, _result_panel
 
-    retag(run["tags"])
     console.print(Rule(f"[bold cyan]Run {idx}/{TOTAL} — {run['title']}[/bold cyan]", style="cyan"))
     console.print()
 
@@ -602,7 +600,7 @@ def run_one(idx: int, run: dict) -> None:
 
 
 def main() -> None:
-    from src.telemetry import flush
+    from src.telemetry import shutdown
     console.print()
     console.print(Panel(
         "[bold white]meeting-agent — 5 curated runs[/bold white]\n"
@@ -616,7 +614,7 @@ def main() -> None:
 
     console.print(Rule("[bold green]All 5 runs complete[/bold green]", style="green"))
     console.print()
-    flush()
+    shutdown()
 
 
 if __name__ == "__main__":

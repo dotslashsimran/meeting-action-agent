@@ -204,7 +204,7 @@ def _result_panel(items_published: int, summary: str, elapsed: float) -> Panel:
 # ── Pipeline runner ────────────────────────────────────────────────────────────
 
 def _validate_env() -> list[str]:
-    return [v for v in ("GEMINI_API_KEY", "NOTION_TOKEN", "NOTION_DATABASE_ID") if not os.getenv(v)]
+    return [v for v in ("GEMINI_API_KEY",) if not os.getenv(v)]
 
 
 def run_pipeline(transcript: str, verbose: bool = False) -> None:

@@ -8,9 +8,10 @@ litellm.drop_params = True
 litellm.retry_after = True
 
 llm = LLM(
-    model="gemini/gemini-2.5-pro",
-    api_key=os.getenv("GEMINI_API_KEY"),
-    is_litellm=True,  # Force LiteLLM routing so Neatlogs instruments LLM calls + costs
+    model="groq/llama-3.3-70b-versatile",
+    # model="gemini/gemini-2.5-flash",
+    api_key=os.getenv("GROQ_API_KEY"),
+    #api_key=os.getenv("GEMINI_API_KEY"),
     max_retries=6,
-    timeout=120,
+    timeout=180,
 )

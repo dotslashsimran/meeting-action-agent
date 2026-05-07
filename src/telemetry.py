@@ -14,7 +14,7 @@ Each pipeline run becomes one WORKFLOW span containing:
 import os
 
 
-_BASE_TAGS = ["meeting-agent", "notion", "gemini-2.5-pro", "crewai"]
+_BASE_TAGS = ["meeting-agent", "notion", "gemini-2.5-flash", "crewai"]
 
 
 def init(tags: list[str] | None = None) -> bool:
@@ -32,16 +32,15 @@ def init(tags: list[str] | None = None) -> bool:
     import logging
     import neatlogs
 
-    logging.getLogger("neatlogs").setLevel(logging.CRITICAL)
+    for logger in ("neatlogs", "litellm", "urllib3", "httpcore", "asyncio", "LiteLLM"):
+        logging.getLogger(logger).setLevel(logging.CRITICAL)
 
     neatlogs.init(
         api_key=api_key,
         endpoint=endpoint,
         workflow_name="Meeting Intelligence",
-        instrumentations=["crewai", "litellm"],
+        instrumentations=["crewai", "litellm", "google_genai"],
         tags=_BASE_TAGS + (tags or []),
-        auto_session=True,
-        flush_interval=2.0,
         debug=False,
     )
     return True
@@ -68,10 +67,8 @@ def retag(tags: list[str]) -> None:
             api_key=api_key,
             endpoint=endpoint,
             workflow_name="Meeting Intelligence",
-            instrumentations=["crewai", "litellm"],
+            instrumentations=["crewai", "litellm", "google_genai"],
             tags=_BASE_TAGS + tags,
-            auto_session=True,
-            flush_interval=2.0,
             debug=False,
         )
     except Exception:

@@ -20,6 +20,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Type
 
+import neatlogs
 from crewai.tools import BaseTool
 from notion_client import Client
 from pydantic import BaseModel, Field
@@ -97,6 +98,7 @@ class NotionTool(BaseTool):
     )
     args_schema: Type[BaseModel] = NotionToolInput
 
+    @neatlogs.span(kind="TOOL", name="Publish Action Item", tool_name="notion_publisher", description="Creates a richly formatted action item page in Notion (or local dummy mode)")
     def _run(self, action_item_json: str) -> str:
         data: dict = {}
         try:
@@ -152,15 +154,28 @@ class NotionTool(BaseTool):
                 for note in (notes if isinstance(notes, list) else [notes]):
                     children.append(_bullet(str(note)))
 
-            notion = Client(auth=os.environ["NOTION_TOKEN"])
-            database_id = os.environ["NOTION_DATABASE_ID"]
+            notion_token = os.environ.get("NOTION_TOKEN", "")
+            database_id = os.environ.get("NOTION_DATABASE_ID", "dummy")
 
-            page = notion.pages.create(
-                parent={"database_id": database_id},
-                properties={"Name": {"title": [_text(title)]}},
-                children=children,
-            )
-            page_id = page.get("id", "unknown")
+            if notion_token and notion_token != "dummy":
+                notion = Client(auth=notion_token)
+                page = notion.pages.create(
+                    parent={"database_id": database_id},
+                    properties={"Name": {"title": [_text(title)]}},
+                    children=children,
+                )
+                page_id = page.get("id", "unknown")
+            else:
+                # Dummy mode — write to local file instead of Notion
+                import pathlib, uuid
+                out_dir = pathlib.Path("notion_output")
+                out_dir.mkdir(exist_ok=True)
+                page_id = str(uuid.uuid4())[:8]
+                record = {"page_id": page_id, "title": title, "data": data, "blocks": len(children)}
+                out_file = out_dir / f"{page_id}_{title[:30].replace('/', '-').replace(' ', '_')}.json"
+                with open(out_file, "w") as f:
+                    json.dump(record, f, indent=2)
+                page_id = f"local:{page_id}"
 
             # Accumulate for post-run sprint summary
             _session_items.append(data)
@@ -270,15 +285,26 @@ def create_sprint_summary() -> str:
                 blocks.append(_bullet(c))
             blocks.append(_divider())
 
-        notion = Client(auth=os.environ["NOTION_TOKEN"])
-        database_id = os.environ["NOTION_DATABASE_ID"]
+        notion_token = os.environ.get("NOTION_TOKEN", "")
+        database_id = os.environ.get("NOTION_DATABASE_ID", "dummy")
 
-        page = notion.pages.create(
-            parent={"database_id": database_id},
-            properties={"Name": {"title": [_text(f"Sprint Summary — {today}")]}},
-            children=blocks,
-        )
-        page_id = page.get("id", "unknown")
+        if notion_token and notion_token != "dummy":
+            notion = Client(auth=notion_token)
+            page = notion.pages.create(
+                parent={"database_id": database_id},
+                properties={"Name": {"title": [_text(f"Sprint Summary — {today}")]}},
+                children=blocks,
+            )
+            page_id = page.get("id", "unknown")
+        else:
+            import pathlib, uuid
+            out_dir = pathlib.Path("notion_output")
+            out_dir.mkdir(exist_ok=True)
+            page_id = str(uuid.uuid4())[:8]
+            record = {"page_id": page_id, "title": f"Sprint Summary — {today}", "items": items}
+            with open(out_dir / f"sprint_summary_{page_id}.json", "w") as f:
+                json.dump(record, f, indent=2)
+            page_id = f"local:{page_id}"
         owner_list = ", ".join(sorted(by_owner.keys()))
         return (
             f"Sprint Summary published | {total} items | "

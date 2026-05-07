@@ -15,7 +15,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Neatlogs must init before any LLM/CrewAI imports
-from src.telemetry import init as _telemetry_init, flush as _telemetry_flush
+from src.telemetry import flush as _telemetry_flush
+from src.telemetry import init as _telemetry_init
+from src.telemetry import shutdown as _telemetry_shutdown
+
 _TRACING = _telemetry_init()
 
 from rich.console import Console
@@ -204,7 +207,7 @@ def _result_panel(items_published: int, summary: str, elapsed: float) -> Panel:
 # ── Pipeline runner ────────────────────────────────────────────────────────────
 
 def _validate_env() -> list[str]:
-    return [v for v in ("GEMINI_API_KEY", "NOTION_TOKEN", "NOTION_DATABASE_ID") if not os.getenv(v)]
+    return [v for v in ("GEMINI_API_KEY",) if not os.getenv(v)]
 
 
 def run_pipeline(transcript: str, verbose: bool = False) -> None:
@@ -243,6 +246,8 @@ def run_pipeline(transcript: str, verbose: bool = False) -> None:
             console.print(f"\n[dim]{summary}[/dim]\n")
         except Exception as exc:
             console.print(f"\n[bold red]Error:[/bold red] {exc}\n")
+        finally:
+            _telemetry_flush()
         return
 
     t = threading.Thread(target=worker, daemon=True)
@@ -364,50 +369,53 @@ def main() -> None:
 
     verbose = False
 
-    while True:
-        try:
-            raw = input("❯ ").strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n  [dim]Bye![/dim]\n")
-            break
+    try:
+        while True:
+            try:
+                raw = input("❯ ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n  [dim]Bye![/dim]\n")
+                break
 
-        if not raw:
-            continue
+            if not raw:
+                continue
 
-        cmd = raw.lower()
+            cmd = raw.lower()
 
-        if cmd in ("/quit", "/exit", "q", "quit", "exit"):
-            console.print("\n  [dim]Bye![/dim]\n")
-            break
+            if cmd in ("/quit", "/exit", "q", "quit", "exit"):
+                console.print("\n  [dim]Bye![/dim]\n")
+                break
 
-        elif cmd == "/demo":
-            run_pipeline(DEMO_TRANSCRIPT, verbose)
+            elif cmd == "/demo":
+                run_pipeline(DEMO_TRANSCRIPT, verbose)
 
-        elif cmd == "/paste":
-            transcript = _get_paste()
-            if transcript:
-                run_pipeline(transcript, verbose)
-
-        elif raw.startswith("/file"):
-            path = raw[5:].strip()
-            if not path:
-                console.print("  [dim red]Usage: /file <path>[/dim red]\n")
-            else:
-                transcript = _load_file(path)
+            elif cmd == "/paste":
+                transcript = _get_paste()
                 if transcript:
                     run_pipeline(transcript, verbose)
 
-        elif cmd == "/verbose":
-            verbose = not verbose
-            state = "on" if verbose else "off"
-            icon  = "[on]" if verbose else "[off]"
-            console.print(f"  [dim]{icon}  Verbose mode: {state}[/dim]\n")
+            elif raw.startswith("/file"):
+                path = raw[5:].strip()
+                if not path:
+                    console.print("  [dim red]Usage: /file <path>[/dim red]\n")
+                else:
+                    transcript = _load_file(path)
+                    if transcript:
+                        run_pipeline(transcript, verbose)
 
-        elif cmd in ("/help", "help", "?", "h"):
-            _print_help()
+            elif cmd == "/verbose":
+                verbose = not verbose
+                state = "on" if verbose else "off"
+                icon = "[on]" if verbose else "[off]"
+                console.print(f"  [dim]{icon}  Verbose mode: {state}[/dim]\n")
 
-        else:
-            console.print("  [dim]Unknown command — type [bold cyan]/help[/bold cyan][/dim]\n")
+            elif cmd in ("/help", "help", "?", "h"):
+                _print_help()
+
+            else:
+                console.print("  [dim]Unknown command — type [bold cyan]/help[/bold cyan][/dim]\n")
+    finally:
+        _telemetry_shutdown()
 
 
 if __name__ == "__main__":

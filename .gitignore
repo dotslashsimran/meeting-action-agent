@@ -8,3 +8,5 @@ dist/
 build/
 outputs/
 .DS_Store
+.venv
+notion_output

@@ -12,7 +12,7 @@ import threading
 from dotenv import load_dotenv
 load_dotenv()
 
-from src.telemetry import init as _telemetry_init, retag, flush
+from src.telemetry import init as _telemetry_init, shutdown as _telemetry_shutdown
 _telemetry_init()
 
 from rich.console import Console
@@ -156,7 +156,6 @@ def run_it() -> None:
     from src.crew import run as crew_run
     from main import STAGES, _progress_panel, _result_panel
 
-    retag(RUN["tags"])
     console.print(Rule(f"[bold cyan]{RUN['title']}[/bold cyan]", style="cyan"))
     console.print()
 
@@ -206,7 +205,7 @@ def run_it() -> None:
     console.print()
     console.print(_result_panel(items_published, state["summary"] or "", elapsed))
     console.print()
-    flush()
+    _telemetry_shutdown()
 
 
 if __name__ == "__main__":

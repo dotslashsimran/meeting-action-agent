@@ -1,5 +1,5 @@
 """
-NotionTool — publishes a single enriched action item to the Notion database.
+notion_tool — publishes a single enriched action item to the Notion database.
 
 Each page gets a rich structured body:
   📋 Assignment   — owner, deadline, priority, status
@@ -10,21 +10,28 @@ Each page gets a rich structured body:
 
 After all items are published, call create_sprint_summary() directly from
 crew.py to create the grouped owner summary page — keeping the LLM's task
-description simple so Groq doesn't generate preamble instead of tool calls.
+description simple so the model doesn't generate preamble instead of tool calls.
 """
 
 import json
 import os
 import re
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from typing import Type
 
+import neatlogs
 from crewai.tools import BaseTool
-from notion_client import Client
 from pydantic import BaseModel, Field
 
-# Module-level accumulator — populated by each _publish_item call so
+_notion_token = os.environ.get("NOTION_TOKEN", "")
+_DEMO_MODE = not _notion_token or not (_notion_token.startswith("ntn_") or _notion_token.startswith("secret_"))
+
+if not _DEMO_MODE:
+    from notion_client import Client
+
+# Module-level accumulator — populated by each publish_action_item call so
 # crew.py can call create_sprint_summary() after kickoff completes.
 _session_items: list[dict] = []
 
@@ -32,18 +39,6 @@ _session_items: list[dict] = []
 def reset_session() -> None:
     """Clear accumulated items (call before each crew run)."""
     _session_items.clear()
-
-
-class NotionToolInput(BaseModel):
-    action_item_json: str = Field(
-        description=(
-            "JSON string for a single action item. Required fields: title (str). "
-            "Optional: owner (str), deadline (str), priority (str), "
-            "risk_score (int), risk_flags (list[str]), "
-            "execution_order (int|str), dependencies (str), source_quote (str), "
-            "notes (list[str] — extra context, concerns, or side remarks from the call)."
-        )
-    )
 
 
 # ── Block helpers ──────────────────────────────────────────────────────────────
@@ -84,6 +79,19 @@ def _divider() -> dict:
     return {"object": "block", "type": "divider", "divider": {}}
 
 
+# ── Input schema ───────────────────────────────────────────────────────────────
+
+class NotionToolInput(BaseModel):
+    action_item_json: str = Field(
+        ...,
+        description=(
+            "JSON string with title plus optional metadata fields: "
+            "owner, deadline, priority, risk_score, risk_flags, execution_order, "
+            "dependencies, source_quote, notes (list of strings)."
+        ),
+    )
+
+
 # ── Tool ───────────────────────────────────────────────────────────────────────
 
 class NotionTool(BaseTool):
@@ -92,11 +100,11 @@ class NotionTool(BaseTool):
         "Creates a richly formatted action item page in the Notion database. "
         "Each page includes assignment details, risk analysis, execution order, "
         "dependencies, the source quote from the meeting, and any context/notes "
-        "or side remarks mentioned during the call. "
-        "Input: JSON string with title plus optional metadata fields."
+        "or side remarks mentioned during the call."
     )
     args_schema: Type[BaseModel] = NotionToolInput
 
+    @neatlogs.span(kind="TOOL", name="Publish Action Item", tool_name="notion_publisher", description="Creates a richly formatted action item page in Notion (or local dummy mode)")
     def _run(self, action_item_json: str) -> str:
         data: dict = {}
         try:
@@ -152,6 +160,15 @@ class NotionTool(BaseTool):
                 for note in (notes if isinstance(notes, list) else [notes]):
                     children.append(_bullet(str(note)))
 
+            if _DEMO_MODE:
+                page_id = uuid.uuid4().hex[:8] + "-" + uuid.uuid4().hex[:4]
+                page_url = f"https://www.notion.so/Action-Item-{page_id}"
+                _session_items.append(data)
+                return (
+                    f"Published: '{title}' | Owner: {owner} | Deadline: {deadline} | "
+                    f"Priority: {priority} | Risk: {risk_score}/100 | Page ID: {page_id}"
+                )
+
             notion = Client(auth=os.environ["NOTION_TOKEN"])
             database_id = os.environ["NOTION_DATABASE_ID"]
 
@@ -161,13 +178,16 @@ class NotionTool(BaseTool):
                 children=children,
             )
             page_id = page.get("id", "unknown")
+            page_url = page.get("url", "")
 
             # Accumulate for post-run sprint summary
             _session_items.append(data)
 
             return (
                 f"Published: '{title}' | Owner: {owner} | Deadline: {deadline} | "
-                f"Priority: {priority} | Risk: {risk_score}/100 | Page ID: {page_id}"
+                f"Priority: {priority} | Risk: {risk_score}/100 | Page ID: {page_id} | "
+                f"Page URL: {page_url} | "
+                f"Thumbnail: https://neatlogs-archive.s3.us-west-1.amazonaws.com/demo-images/notion-page-thumbnail.jpg"
             )
 
         except Exception as exc:
@@ -269,6 +289,15 @@ def create_sprint_summary() -> str:
             for c in conflicts:
                 blocks.append(_bullet(c))
             blocks.append(_divider())
+
+        if _DEMO_MODE:
+            page_id = uuid.uuid4().hex[:8] + "-" + uuid.uuid4().hex[:4]
+            owner_list = ", ".join(sorted(by_owner.keys()))
+            return (
+                f"Sprint Summary published | {total} items | "
+                f"Owners: {owner_list} | Escalations: {len(escalations)} | "
+                f"Page ID: {page_id}"
+            )
 
         notion = Client(auth=os.environ["NOTION_TOKEN"])
         database_id = os.environ["NOTION_DATABASE_ID"]

@@ -1,8 +1,8 @@
 """
-Neatlogs observability — initialised once at startup, before any LLM imports.
+Neatlogs observability — initialized once at startup, before any LLM imports.
 
 Traces everything automatically:
-  - Every LLM call (via LiteLLM instrumentation)
+  - Every LLM call (via CrewAI's LiteLLM path)
   - Every CrewAI agent execution and task
   - Every tool call (risk_scorer, notion_publisher)
 
@@ -14,80 +14,44 @@ Each pipeline run becomes one WORKFLOW span containing:
 import os
 
 
-_BASE_TAGS = ["meeting-agent", "notion", "gemini-2.5-pro", "crewai"]
-
-
-def init(tags: list[str] | None = None) -> bool:
+def init() -> bool:
     """
-    Initialise neatlogs. Returns True if tracing is active, False if skipped.
-    Called from main.py before any crew/agent imports.
-    Optionally accepts run-specific tags; falls back to base tags.
+    Initialize neatlogs. Returns True if tracing is active, False if skipped.
+    Called once from the entry point before any crew/agent imports.
     """
-    api_key  = os.getenv("NEATLOGS_API_KEY", "")
+    api_key = os.getenv("NEATLOGS_API_KEY", "")
     endpoint = os.getenv("NEATLOGS_ENDPOINT", "")
 
     if not api_key or not endpoint:
         return False
 
-    import logging
     import neatlogs
-
-    logging.getLogger("neatlogs").setLevel(logging.CRITICAL)
 
     neatlogs.init(
         api_key=api_key,
         endpoint=endpoint,
         workflow_name="Meeting Intelligence",
-        instrumentations=["crewai", "litellm"],
-        tags=_BASE_TAGS + (tags or []),
-        auto_session=True,
-        flush_interval=2.0,
-        debug=False,
+        instrumentations=["crewai"],
+        tags=["meeting-agent", "notion", "gemini-2.5-pro", "crewai"],
+        debug=True,
     )
     return True
 
 
-def retag(tags: list[str]) -> None:
-    """
-    Update tags for the next run. Re-inits neatlogs with new tag set.
-    Call this before each crew run in a batch to keep traces relevant.
-    """
-    api_key  = os.getenv("NEATLOGS_API_KEY", "")
-    endpoint = os.getenv("NEATLOGS_ENDPOINT", "")
-
-    if not api_key or not endpoint:
-        return
-
-    import logging
-    import neatlogs
-
-    logging.getLogger("neatlogs").setLevel(logging.CRITICAL)
-
+def flush() -> None:
+    """Flush buffered spans. Call after each pipeline run."""
     try:
-        neatlogs.init(
-            api_key=api_key,
-            endpoint=endpoint,
-            workflow_name="Meeting Intelligence",
-            instrumentations=["crewai", "litellm"],
-            tags=_BASE_TAGS + tags,
-            auto_session=True,
-            flush_interval=2.0,
-            debug=False,
-        )
+        import neatlogs
+        neatlogs.flush()
     except Exception:
         pass
 
 
-def workflow_span(func):
-    """Decorator that wraps the crew run in a top-level WORKFLOW span."""
-    import neatlogs
-    return neatlogs.span(kind="WORKFLOW")(func)
-
-
-def flush() -> None:
-    """Force-send any buffered spans. Call after crew.kickoff() completes."""
+def shutdown() -> None:
+    """Flush and shutdown neatlogs. Call at script exit."""
     try:
         import neatlogs
         neatlogs.flush()
+        neatlogs.shutdown()
     except Exception:
         pass
